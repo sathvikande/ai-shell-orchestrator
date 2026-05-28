@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  bot-server:
+    build: .
+    container_name: portable_ai_bot
+    restart: always
+    network_mode: "host"
+    env_file:
+      - .env
+    environment:
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
+      - http_proxy=${http_proxy}
+      - https_proxy=${https_proxy}
+    volumes:
+      - .:/app:Z  # <--- Added :Z right here to fix SELinux permissions!
