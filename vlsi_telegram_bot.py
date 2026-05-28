@@ -290,8 +290,29 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await context.bot.edit_message_text(chat_id=query.message.chat_id, message_id=status_msg_id, text=f"❌ **Error:** {err}")
         context.user_data.clear()
 
+
+    # ==========================================
+# 7. Render Keep-Alive Web Server
+# ==========================================
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b"VLSI Bot is alive and running!")
+
+    def log_message(self, format, *args):
+        pass 
+
+def start_health_server():
+    port = int(os.environ.get("PORT", 10000)) 
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    server.serve_forever()
+
 if __name__ == "__main__":
     init_db()
+    threading.Thread(target=start_health_server, daemon=True).start()
+
     request_config = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).request(request_config).build()
     app.add_handler(CommandHandler("start", start))
@@ -299,3 +320,4 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling()
+
