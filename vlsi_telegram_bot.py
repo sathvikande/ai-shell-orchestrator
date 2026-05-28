@@ -2,7 +2,7 @@ import logging
 import asyncio
 import os
 import subprocess
-import sqlite3
+import psycopg2
 import urllib.request
 import urllib.parse
 import re
@@ -22,43 +22,47 @@ from telegram.request import HTTPXRequest
 from litellm import acompletion
 
 # ==========================================
-# 1. Logging & Permanent Memory Setup
+# 1. Logging & Cloud PostgreSQL Database
 # ==========================================
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-DB_FILE = "audit.db"
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL)
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    # Table for shell commands
-    cursor.execute('''CREATE TABLE IF NOT EXISTS command_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, user_id INTEGER, command TEXT, status TEXT, output TEXT)''')
-    # NEW: Table for permanent conversational memory
-    cursor.execute('''CREATE TABLE IF NOT EXISTS chat_memory (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, role TEXT, content TEXT, timestamp TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS command_audit (id SERIAL PRIMARY KEY, timestamp TEXT, user_id BIGINT, command TEXT, status TEXT, output TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS chat_memory (id SERIAL PRIMARY KEY, user_id BIGINT, role TEXT, content TEXT, timestamp TEXT)''')
     conn.commit()
+    cursor.close()
     conn.close()
 
 def log_audit(user_id, command, status, output):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('''INSERT INTO command_audit (timestamp, user_id, command, status, output) VALUES (?, ?, ?, ?, ?)''', (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_id, command, status, output))
+    cursor.execute('''INSERT INTO command_audit (timestamp, user_id, command, status, output) VALUES (%s, %s, %s, %s, %s)''', (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_id, command, status, output))
     conn.commit()
+    cursor.close()
     conn.close()
 
 def save_chat_memory(user_id, role, content):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO chat_memory (user_id, role, content, timestamp) VALUES (?, ?, ?, ?)", (user_id, role, content, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    cursor.execute("INSERT INTO chat_memory (user_id, role, content, timestamp) VALUES (%s, %s, %s, %s)", (user_id, role, content, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit()
+    cursor.close()
     conn.close()
 
 def get_chat_history(user_id, limit=8):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    # Fetch the most recent messages and reverse them to chronologial order for the AI
-    cursor.execute("SELECT role, content FROM chat_memory WHERE user_id = ? ORDER BY id DESC LIMIT ?", (user_id, limit))
+    cursor.execute("SELECT role, content FROM chat_memory WHERE user_id = %s ORDER BY id DESC LIMIT %s", (user_id, limit))
     rows = cursor.fetchall()
+    cursor.close()
     conn.close()
     return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
 
@@ -138,13 +142,12 @@ Context about me:
 - I script in Tcl and Python to automate workflows.
 
 How you must behave:
-1. EXTREME BREVITY: Give the exact, direct answer immediately. No fluff, no rambling, and no chatty introductions. 
+1. EXTREME BREVITY: Give the exact, direct answer immediately. No fluff, no rambling.
 2. ONE QUESTION ONLY: You must strictly end your response with EXACTLY ONE relevant follow-up question to keep me focused. Never ask two questions.
 3. ADAPT TO ME: Frame your answers through the lens of semiconductor engineering.
 4. BE PRACTICAL: Default to Verilog, SystemVerilog, Tcl, or Python for code.
 5. USE MEMORY: Refer back to earlier context seamlessly.
-6. SYSTEM ADMIN: If the user asks to execute a shell command, output EXACTLY 'EXECUTE: <command>' on a new line.
-7. Start every response with a brief, friendly greeting."""
+6. SYSTEM ADMIN: If the user asks to execute a shell command, output EXACTLY 'EXECUTE: <command>' on a new line."""
 
 CLASSIFIER_PROMPT = "Reply EXACTLY with [SEARCH_REQUIRED] if the user asks for real-world data, news, or URLs. Reply EXACTLY with [RESEARCH_REQUIRED] if the user asks for technical/VLSI tasks or coding. Otherwise, chat normally."
 
@@ -168,7 +171,7 @@ async def call_with_failover(messages, model_pool, temperature=0.7, context=None
 # ==========================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USER_IDS: return
-    await update.message.reply_text("🧠 **God-Mode Online!**\nWeb Browsing, Linux Execution, and Permanent SQLite Memory Banks are fully operational. What are we working on today?", parse_mode='Markdown')
+    await update.message.reply_text("🧠 **Cloud Node Online!**\nWeb Browsing, Linux Execution, and Neon Postgres Memory Banks are operational.", parse_mode='Markdown')
 
 async def direct_shell(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sender_id = update.effective_user.id
@@ -185,8 +188,6 @@ async def direct_shell(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bt = "```"
         formatted_text = f"🖥️ **Output:**\n\n{bt}bash\n{terminal_log[:3800]}\n{bt}"
         await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=status_msg.message_id, text=formatted_text, parse_mode='Markdown')
-        
-        # Save shell execution to permanent memory so the bot knows what you did
         save_chat_memory(sender_id, "user", f"I manually executed this shell command: `{linux_command}`. The output was:\n{terminal_log}")
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
@@ -198,9 +199,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_query = update.message.text
     status_msg = await update.message.reply_text("🤔 Thinking...")
     
-    # 🧠 Load the last 8 messages from the Permanent SQLite Database
     chat_history = get_chat_history(sender_id, limit=8)
-    
     current_date = datetime.now().strftime("%A, %B %d, %Y")
     system_context = f"{MASTER_PERSONA}\n\n[System Note: Today is {current_date}, 2026.]"
 
@@ -218,7 +217,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         final_reply, final_model = await call_with_failover(messages, RESEARCH_POOL, 0.6, context, status_msg, "Synthesizing")
         
-        # 💾 Save current interaction to the Permanent SQLite Database
         save_chat_memory(sender_id, "user", user_query)
         save_chat_memory(sender_id, "assistant", final_reply)
 
@@ -281,8 +279,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             bt = "```"
             formatted_text = f"🖥️ **Output:**\n\n{bt}bash\n{result_log}\n{bt}"
             await context.bot.edit_message_text(chat_id=query.message.chat_id, message_id=status_msg_id, text=formatted_text, parse_mode='Markdown')
-            
-            # 💾 Save execution results to permanent memory
             save_chat_memory(sender_id, "user", f"I executed your suggested command `{command}`. The output was:\n{result_log}")
             
         except Exception as err:
