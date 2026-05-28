@@ -8,8 +8,7 @@ import urllib.parse
 import re
 import concurrent.futures
 import threading
-from http.server
- import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import xml.etree.ElementTree as ET
 from datetime import datetime
