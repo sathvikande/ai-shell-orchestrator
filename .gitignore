@@ -1,3 +1,5 @@
 .env
 audit.db
 __pycache__/
+audit.db
+__pycache__/
