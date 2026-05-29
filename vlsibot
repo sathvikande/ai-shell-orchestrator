@@ -87,7 +87,11 @@ def generate_tb_ai(file_path):
     )
 
     url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+   headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}", 
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (VLSICLIBot/1.0)"
+    }
     data = {"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": ai_prompt}], "temperature": 0.2}
 
     try:
