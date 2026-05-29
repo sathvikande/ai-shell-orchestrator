@@ -426,7 +426,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"⚙️ Running analysis script locally via {model_used}...")
             
             # Execute the generated Pandas script
-           try:
+            try:
                 process = subprocess.run(["python3", script_path], capture_output=True, text=True, timeout=30)
                 if process.returncode == 0:
                     analysis_output = process.stdout.strip()[:3800]
