@@ -364,7 +364,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     document = update.message.document
     file_name = document.file_name
-    caption = update.message.caption or ""
+    
+    # Safely grab the caption if it exists, make it lowercase
+    caption = (update.message.caption or "").strip().lower()
     
     status_msg = await update.message.reply_text(f"📥 Downloading `{file_name}` to cloud container...")
 
@@ -373,10 +375,17 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_path = f"/tmp/{file_name}"
         await bot_file.download_to_drive(save_path)
         
-        # Check if the user passed the '/analyze' shortcut
-       # Trigger analysis if caption has /analyze OR if filename has a keyword
-        if caption.startswith('/analyze') or 'power' in file_name.lower():
-            analysis_type = "power" if 'power' in file_name.lower() else caption.split()[1]
+        # BULLETPROOF TRIGGER: Run if caption has /analyze OR if it's ANY .csv file!
+        if caption.startswith('/analyze') or file_name.endswith('.csv'):
+            
+            # Decide what kind of analysis to run
+            if caption.startswith('/analyze'):
+                parts = caption.split()
+                analysis_type = parts[1] if len(parts) > 1 else "general"
+            elif 'power' in file_name.lower():
+                analysis_type = "power"
+            else:
+                analysis_type = "general data"
             
             await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"📊 Initializing automated '{analysis_type}' analysis on {file_name}...")
             
@@ -445,7 +454,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_chat_memory(sender_id, "user", f"Analyzed {file_name} for '{analysis_type}'.")
             return
 
-        # --- Standard File Upload Logic (If no '/analyze' caption is passed) ---
+        # --- Standard File Upload Logic (If it is a .v file or .log file instead) ---
         success_msg = (
             f"✅ **File saved successfully!**\n\n"
             f"Run this command to check a routing report:\n"
