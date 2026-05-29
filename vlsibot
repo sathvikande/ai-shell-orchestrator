@@ -82,11 +82,11 @@ def generate_tb_ai(file_path):
         "You are an expert Silicon Verification Engineer. "
         "Write a complete, professional SystemVerilog testbench for the following RTL module. "
         "Include proper clock generation, reset initialization, and a basic directed test sequence. "
-        "Output ONLY valid SystemVerilog code. Do NOT wrap it in markdown blockticks like ```systemverilog. Zero conversational filler.\n\n"
+        "Output ONLY valid SystemVerilog code. Do NOT wrap it in markdown blockticks. Zero conversational filler.\n\n"
         f"RTL Code:\n{verilog_code}"
     )
 
-    url = "[https://api.groq.com/openai/v1/chat/completions](https://api.groq.com/openai/v1/chat/completions)"
+    url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     data = {"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": ai_prompt}], "temperature": 0.2}
 
@@ -95,10 +95,69 @@ def generate_tb_ai(file_path):
         with urllib.request.urlopen(req, timeout=20) as response:
             result = json.loads(response.read().decode('utf-8'))
             final_reply = result['choices'][0]['message']['content'].strip()
-            if final_reply.startswith("```"):
+            
+            # Safely handle markdown ticks without breaking python formatting
+            if final_reply.startswith("`" * 3):
                 lines = final_reply.split('\n')
-                if lines[0].startswith("
-http://googleusercontent.com/immersive_entry_chip/0
-http://googleusercontent.com/immersive_entry_chip/1
+                if lines[0].startswith("`" * 3): lines = lines[1:]
+                if lines[-1].startswith("`" * 3): lines = lines[:-1]
+                final_reply = "\n".join(lines).strip()
+                
+    except Exception as e:
+        print(f"❌ AI Generation failed: {e}")
+        return
 
-This method is clean, trackable, and exactly how environment deployment works in an enterprise semiconductor workflow. Let me know when you have updated the code on GitHub and executed the sync!
+    out_file = f"tb_{module_name}_ai.sv"
+    with open(out_file, 'w') as f:
+        f.write(final_reply)
+    print(f"✅ AI SystemVerilog TB generated: {out_file}")
+
+def scan_log(file_path):
+    try:
+        with open(file_path, 'r') as f:
+            log_data = f.read()
+        drc = re.search(r'Total (?:number of )?DRC violations\s*[:=]\s*(\d+)', log_data, re.IGNORECASE)
+        setup = re.search(r'Setup (?:WNS|slack)\s*[:=]\s*([-\d\.]+)', log_data, re.IGNORECASE)
+        hold = re.search(r'Hold (?:WNS|slack)\s*[:=]\s*([-\d\.]+)', log_data, re.IGNORECASE)
+        
+        print(f"\n📄 Scanning: {file_path}")
+        print("--------------------------------")
+        print(f"🛠️  DRC Violations: {drc.group(1) if drc else '0 (or Not Found)'}")
+        print(f"⏱️  Setup WNS:      {setup.group(1) + ' ns' if setup else 'Not Found'}")
+        print(f"⏱️  Hold WNS:       {hold.group(1) + ' ns' if hold else 'Not Found'}")
+        print("--------------------------------\n")
+    except Exception as e:
+        print(f"❌ Error parsing log: {e}")
+
+def log_to_notion(content):
+    if not NOTION_API_KEY or not NOTION_DATABASE_ID:
+        print("❌ Error: NOTION_API_KEY or NOTION_DATABASE_ID missing.")
+        return
+    print("📝 Beaming to Notion...")
+    url = "https://api.notion.com/v1/pages"
+    headers = {"Authorization": f"Bearer {NOTION_API_KEY}", "Content-Type": "application/json", "Notion-Version": "2022-06-28"}
+    data = {"parent": {"database_id": NOTION_DATABASE_ID}, "properties": {"Name": {"title": [{"text": {"content": content[:2000]}}]}}}
+    try:
+        req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'), headers=headers, method='POST')
+        with urllib.request.urlopen(req, timeout=10):
+            print("✅ Saved to Knowledge Base!")
+    except Exception as e:
+        print(f"❌ API Error: {e}")
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("🧠 VLSI Bot CLI v1.0")
+        print("Usage: vlsibot <command> [arguments]")
+        print("\nCommands:")
+        print("  tb <file.v>    : Generate boilerplate SV testbench instantly")
+        print("  aitb <file.v>  : Generate advanced SV testbench using AI")
+        print("  scan <log.txt> : Scan EDA logs for DRC, Setup, and Hold metrics")
+        print("  log \"<text>\"   : Send notes directly to your Notion database")
+        sys.exit(1)
+
+    command = sys.argv[1]
+    if command == "tb" and len(sys.argv) == 3: generate_tb(sys.argv[2])
+    elif command == "aitb" and len(sys.argv) == 3: generate_tb_ai(sys.argv[2])
+    elif command == "scan" and len(sys.argv) == 3: scan_log(sys.argv[2])
+    elif command == "log" and len(sys.argv) >= 3: log_to_notion(" ".join(sys.argv[2:]))
+    else: print(f"❌ Invalid syntax for '{command}'. Run 'vlsibot' with no arguments for help.")
