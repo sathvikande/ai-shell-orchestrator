@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+import sys
+import os
+import re
+import json
+import urllib.request
+from litellm import completion
+
+# ==========================================
+# API Keys (Loaded from your Linux environment)
+# ==========================================
+NOTION_API_KEY = os.environ.get("NOTION_API_KEY")
+NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID")
+RESEARCH_POOL = ["groq/llama-3.3-70b-versatile", "github/gpt-4o", "gemini/gemini-2.5-pro"]
+
+# ==========================================
+# 1. Regex Testbench Generator (vlsibot tb)
+# ==========================================
+def generate_tb(file_path):
+    try:
+        with open(file_path, 'r') as f:
+            verilog_code = f.read()
+    except Exception as e:
+        print(f"❌ Error reading {file_path}: {e}")
+        return
+
+    mod_match = re.search(r'module\s+(\w+)', verilog_code)
+    if not mod_match:
+        print("❌ Could not find a valid Verilog 'module' declaration.")
+        return
+    
+    module_name = mod_match.group(1)
+    ports = re.findall(r'(input|output|inout)\s+(wire|reg|logic)?\s*(\[[^\]]+\])?\s*(\w+)', verilog_code)
+    
+    if not ports:
+        print("❌ Could not parse any input/output ports. Ensure Verilog-2001 syntax.")
+        return
+
+    tb_code = f"`timescale 1ns / 1ps\n\nmodule tb_{module_name}();\n\n"
+    tb_code += "    //========================================\n"
+    tb_code += "    // Signal Declarations\n"
+    tb_code += "    //========================================\n"
+    
+    inst_ports = []
+    has_clk = False
+    clk_name = ""
+    
+    for direction, net_type, dims, name in ports:
+        dims_str = f" {dims.strip()}" if dims else ""
+        tb_code += f"    logic{dims_str} {name};\n"
+        inst_ports.append(f".{name}({name})")
+        if direction == 'input' and name in ['clk', 'clock', 'sys_clk', 'sys_clock']:
+            has_clk = True
+            clk_name = name
+
+    tb_code += f"\n    //========================================\n"
+    tb_code += f"    // DUT Instantiation\n"
+    tb_code += f"    //========================================\n"
+    tb_code += f"    {module_name} dut (\n        "
+    tb_code += ",\n        ".join(inst_ports)
+    tb_code += "\n    );\n\n"
+
+    if has_clk:
+        tb_code += "    //========================================\n"
+        tb_code += "    // Clock Generation (100MHz)\n"
+        tb_code += "    //========================================\n"
+        tb_code += f"    initial {clk_name} = 0;\n"
+        tb_code += f"    always #5 {clk_name} = ~{clk_name};\n\n"
+
+    tb_code += "    //========================================\n"
+    tb_code += "    // Stimulus & Verification\n"
+    tb_code += "    //========================================\n"
+    tb_code += "    initial begin\n"
+    tb_code += "        $dumpfile(\"dump.vcd\");\n"
+    tb_code += f"        $dumpvars(0, tb_{module_name});\n\n"
+    
+    for direction, net_type, dims, name in ports:
+        if direction == 'input' and name != clk_name:
+            tb_code += f"        {name} = 0;\n"
+            
+    tb_code += "\n        #20;\n        // TODO: Drive signals here\n\n"
+    tb_code += "        #100;\n        $display(\"Simulation Complete.\");\n        $finish;\n    end\nendmodule\n"
+    
+    out_file = f"tb_{module_name}.sv"
+    with open(out_file, 'w') as f:
+        f.write(tb_code)
+    print(f"✅ Regex TB generated: {out_file}")
+
+# ==========================================
+# 2. AI Testbench Generator (vlsibot aitb)
+# ==========================================
+def generate_tb_ai(file_path):
+    try:
+        with open(file_path, 'r') as f:
+            verilog_code = f.read()
+    except Exception as e:
+        print(f"❌ Error reading {file_path}: {e}")
+        return
+
+    mod_match = re.search(r'module\s+(\w+)', verilog_code)
+    module_name = mod_match.group(1) if mod_match else "unknown_module"
+
+    print("🤖 AI is analyzing RTL and writing SystemVerilog...")
+    ai_prompt = (
+        "You are an expert Silicon Verification Engineer. "
+        "Write a complete, professional SystemVerilog testbench for the following RTL module. "
+        "Include proper clock generation, reset initialization, and a basic directed test sequence. "
+        "Output ONLY valid SystemVerilog code. Do NOT wrap it in markdown blockticks like ```systemverilog. Zero conversational filler.\n\n"
+        f"RTL Code:\n{verilog_code}"
+    )
+
+    final_reply = None
+    for model in RESEARCH_POOL:
+        try:
+            response = completion(model=model, messages=[{"role": "user", "content": ai_prompt}], temperature=0.2, timeout=15)
+            final_reply = response.choices[0].message.content.strip()
+            # Clean up markdown formatting if the AI still included it
+            final_reply = final_reply.removeprefix("```systemverilog").removeprefix("```verilog").removeprefix("```").removesuffix("```").strip()
+            break
+        except Exception:
+            continue
+
+    if not final_reply:
+        print("❌ All AI models failed to respond.")
+        return
+
+    out_file = f"tb_{module_name}_ai.sv"
+    with open(out_file, 'w') as f:
+        f.write(final_reply)
+    print(f"✅ AI SystemVerilog TB generated: {out_file}")
+
+# ==========================================
+# 3. EDA Log Scanner (vlsibot scan)
+# ==========================================
+def scan_log(file_path):
+    try:
+        with open(file_path, 'r') as f:
+            log_data = f.read()
+            
+        drc = re.search(r'Total (?:number of )?DRC violations\s*[:=]\s*(\d+)', log_data, re.IGNORECASE)
+        setup = re.search(r'Setup (?:WNS|slack)\s*[:=]\s*([-\d\.]+)', log_data, re.IGNORECASE)
+        hold = re.search(r'Hold (?:WNS|slack)\s*[:=]\s*([-\d\.]+)', log_data, re.IGNORECASE)
+        
+        print(f"\n📄 Scanning: {file_path}")
+        print("--------------------------------")
+        print(f"🛠️  DRC Violations: {drc.group(1) if drc else '0 (or Not Found)'}")
+        print(f"⏱️  Setup WNS:      {setup.group(1) + ' ns' if setup else 'Not Found'}")
+        print(f"⏱️  Hold WNS:       {hold.group(1) + ' ns' if hold else 'Not Found'}")
+        print("--------------------------------\n")
+    except Exception as e:
+        print(f"❌ Error parsing log: {e}")
+
+# ==========================================
+# 4. Notion Logger (vlsibot log)
+# ==========================================
+def log_to_notion(content):
+    if not NOTION_API_KEY or not NOTION_DATABASE_ID:
+        print("❌ Error: NOTION_API_KEY or NOTION_DATABASE_ID is missing from your environment.")
+        return
+
+    print("📝 Beaming to Notion...")
+    url = "[https://api.api.notion.com/v1/pages](https://api.api.notion.com/v1/pages)"
+    headers = {
+        "Authorization": f"Bearer {NOTION_API_KEY}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    data = {
+        "parent": {"database_id": NOTION_DATABASE_ID},
+        "properties": {
+            "Name": {
+                "title": [{"text": {"content": content[:2000]}}]
+            }
+        }
+    }
+
+    try:
+        req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'), headers=headers, method='POST')
+        with urllib.request.urlopen(req, timeout=10):
+            print("✅ Saved to Knowledge Base!")
+    except Exception as e:
+        print(f"❌ API Error: {e}")
+
+# ==========================================
+# Main CLI Router
+# ==========================================
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("🧠 VLSI Bot CLI v1.0")
+        print("Usage: vlsibot <command> [arguments]")
+        print("\nCommands:")
+        print("  tb <file.v>    : Generate boilerplate SV testbench instantly")
+        print("  aitb <file.v>  : Generate advanced SV testbench using AI")
+        print("  scan <log.txt> : Scan EDA logs for DRC, Setup, and Hold metrics")
+        print("  log \"<text>\"   : Send notes directly to your Notion database")
+        sys.exit(1)
+
+    command = sys.argv[1]
+
+    if command == "tb" and len(sys.argv) == 3:
+        generate_tb(sys.argv[2])
+    elif command == "aitb" and len(sys.argv) == 3:
+        generate_tb_ai(sys.argv[2])
+    elif command == "scan" and len(sys.argv) == 3:
+        scan_log(sys.argv[2])
+    elif command == "log" and len(sys.argv) >= 3:
+        log_to_notion(" ".join(sys.argv[2:]))
+    else:
+        print(f"❌ Invalid syntax for '{command}'. Run 'vlsibot' with no arguments for help.")
