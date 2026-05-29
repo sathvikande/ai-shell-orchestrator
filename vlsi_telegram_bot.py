@@ -432,7 +432,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     analysis_output = process.stdout.strip()[:3800]
                     response_msg = f"✅ **Analysis Complete:**\n\n```text\n{analysis_output}\n```"
                 else:
-                    response_msg = f"❌ **Execution Error in auto-script:**\n
+                    response_msg = f"❌ **Execution Error in auto-script:**\n```text\n{process.stderr}\n```"
 http://googleusercontent.com/immersive_entry_chip/0
 
 ### Why did it fail?
