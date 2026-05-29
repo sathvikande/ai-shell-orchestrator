@@ -3,3 +3,4 @@ litellm>=1.0.0
 httpx>=0.24.0
 asyncio
 psycopg2-binary==2.9.9
+APScheduler==3.10.4
