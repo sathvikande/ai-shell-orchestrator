@@ -409,7 +409,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Do not use input() or plot GUIs. Assume the file exists."
             )
             
-           user_prompt = f"""
+            # FIX: We instruct the AI to strip column whitespace to avoid KeyErrors
+            user_prompt = f"""
             The user wants a '{analysis_type}' analysis on the file located at: '{save_path}'
             Here is the exact data structure/headers:
             {df_peek}
@@ -633,4 +634,3 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     app.run_polling()
-
