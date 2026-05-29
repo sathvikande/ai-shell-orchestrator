@@ -374,9 +374,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await bot_file.download_to_drive(save_path)
         
         # Check if the user passed the '/analyze' shortcut
-        if caption.startswith('/analyze'):
-            cmd_parts = caption.split()
-            analysis_type = cmd_parts[1] if len(cmd_parts) > 1 else "general"
+       # Trigger analysis if caption has /analyze OR if filename has a keyword
+        if caption.startswith('/analyze') or 'power' in file_name.lower():
+            analysis_type = "power" if 'power' in file_name.lower() else caption.split()[1]
             
             await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"📊 Initializing automated '{analysis_type}' analysis on {file_name}...")
             
