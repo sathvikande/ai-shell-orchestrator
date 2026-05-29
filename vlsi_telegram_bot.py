@@ -363,13 +363,13 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if sender_id not in ALLOWED_USER_IDS: return
 
     document = update.message.document
-    file_name = document.file_name
+    file_name = document.file_name or "unknown_file"
     
     # Safely grab the caption if it exists, make it lowercase
     caption = (update.message.caption or "").strip().lower()
     
-    status_msg = await update.message.reply_text(f"📥 Downloading `{file_name}` to cloud container...")
-
+    # DEBUG MESSAGE: The bot will now tell you exactly what it saw!
+    status_msg = await update.message.reply_text(f"📥 Received File: `{file_name}`\n📝 Caption Seen: `{caption}`\nDownloading to cloud...")
     try:
         bot_file = await context.bot.get_file(document.file_id)
         save_path = f"/tmp/{file_name}"
