@@ -433,9 +433,3 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     response_msg = f"✅ **Analysis Complete:**\n\n```text\n{analysis_output}\n```"
                 else:
                     response_msg = f"❌ **Execution Error in auto-script:**\n```text\n{process.stderr}\n```"
-http://googleusercontent.com/immersive_entry_chip/0
-
-### Why did it fail?
-Sometimes when f-strings contain multiple line breaks (`\n`) and backticks directly next to `{variables}`, the Python interpreter gets confused about where the string actually ends, especially on different Linux environments like Render's containers. Changing it to standard string concatenation (`+`) safely bypasses the issue.
-
-Commit that small change to your GitHub repo, and Render will automatically trigger a new, successful deployment! Let me know when it says "Live".
