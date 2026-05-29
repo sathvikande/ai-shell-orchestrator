@@ -289,8 +289,70 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await context.bot.edit_message_text(chat_id=query.message.chat_id, message_id=status_msg_id, text=f"❌ **Error:** {err}")
         context.user_data.clear()
 
+async def alarm_callback(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+    await context.bot.send_message(job.chat_id, text=f"🔔 **SIMULATION REMINDER:** `{job.data}`", parse_mode='Markdown')
 
-    # ==========================================
+async def set_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sender_id = update.effective_user.id
+    if sender_id not in ALLOWED_USER_IDS: return
+    
+    try:
+        time_str = context.args[0]
+        task = " ".join(context.args[1:])
+        
+        unit = time_str[-1].lower()
+        value = int(time_str[:-1]) if unit in ['s', 'm', 'h'] else int(time_str)
+        
+        if unit == 'h': delay = value * 3600
+        elif unit == 'm': delay = value * 60
+        else: delay = value 
+        
+        context.job_queue.run_once(alarm_callback, delay, chat_id=update.effective_chat.id, data=task)
+        await update.message.reply_text(f"⏳ Timer set for {time_str}. Monitoring: `{task}`", parse_mode='Markdown')
+    except (IndexError, ValueError):
+        await update.message.reply_text("Usage: `/remind <time(s/m/h)> <task>`\nExample: `/remind 45m Check Innovus timing reports`", parse_mode='Markdown')
+
+async def scan_eda_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sender_id = update.effective_user.id
+    if sender_id not in ALLOWED_USER_IDS: return
+
+    if not context.args:
+        await update.message.reply_text("Usage: `/scanlog <path_to_log_file>`", parse_mode='Markdown')
+        return
+
+    log_path = context.args[0]
+    
+    try:
+        with open(log_path, 'r') as file:
+            log_data = file.read()
+            
+        drc_match = re.search(r'Total (?:number of )?DRC violations\s*[:=]\s*(\d+)', log_data, re.IGNORECASE)
+        setup_match = re.search(r'Setup (?:WNS|slack)\s*[:=]\s*([-\d\.]+)', log_data, re.IGNORECASE)
+        hold_match = re.search(r'Hold (?:WNS|slack)\s*[:=]\s*([-\d\.]+)', log_data, re.IGNORECASE)
+        
+        drc = drc_match.group(1) if drc_match else "0"
+        setup = setup_match.group(1) if setup_match else "0.000"
+        hold = hold_match.group(1) if hold_match else "0.000"
+        
+        is_clean = (drc == "0" and float(setup) >= 0 and float(hold) >= 0)
+        header = "✅ **RTL-to-GDSII CLEAN**" if is_clean else "⚠️ **VIOLATIONS DETECTED**"
+
+        report = (
+            f"{header}\n\n"
+            f"📄 **File:** `{log_path.split('/')[-1]}`\n"
+            f"🛠️ **DRC Violations:** `{drc}`\n"
+            f"⏱️ **Setup WNS:** `{setup} ns`\n"
+            f"⏱️ **Hold WNS:** `{hold} ns`"
+        )
+        await update.message.reply_text(report, parse_mode='Markdown')
+
+    except FileNotFoundError:
+        await update.message.reply_text(f"❌ File not found: `{log_path}`")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error parsing log: {e}")
+
+# ==========================================
 # 7. Render Keep-Alive Web Server
 # ==========================================
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -314,9 +376,12 @@ if __name__ == "__main__":
 
     request_config = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).request(request_config).build()
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("sh", direct_shell))
+    app.add_handler(CommandHandler("remind", set_reminder))
+    app.add_handler(CommandHandler("scanlog", scan_eda_log))
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
     app.run_polling()
-
