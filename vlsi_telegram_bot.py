@@ -597,4 +597,38 @@ async def generate_tb_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==========================================
 # 7. Render Keep-Alive Web Server
 # ==========================================
-class HealthCheckHandler
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b"VLSI Bot is alive and running!")
+
+    def log_message(self, format, *args):
+        pass 
+
+def start_health_server():
+    port = int(os.environ.get("PORT", 10000)) 
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    server.serve_forever()
+
+if __name__ == "__main__":
+    init_db()
+    threading.Thread(target=start_health_server, daemon=True).start()
+
+    request_config = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).request(request_config).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("sh", direct_shell))
+    app.add_handler(CommandHandler("remind", set_reminder))
+    app.add_handler(CommandHandler("scanlog", scan_eda_log))
+    app.add_handler(CommandHandler("log", log_to_notion))
+    app.add_handler(CommandHandler("tb", generate_tb))
+    app.add_handler(CommandHandler("aitb", generate_tb_ai))
+    app.add_handler(CallbackQueryHandler(handle_callback_query))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    app.run_polling()
+
