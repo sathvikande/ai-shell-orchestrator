@@ -4,7 +4,7 @@ import os
 import re
 import json
 import urllib.request
-from litellm import completion
+
 
 # ==========================================
 # API Keys (Loaded from your Linux environment)
@@ -100,6 +100,11 @@ def generate_tb_ai(file_path):
     mod_match = re.search(r'module\s+(\w+)', verilog_code)
     module_name = mod_match.group(1) if mod_match else "unknown_module"
 
+    GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+    if not GROQ_API_KEY:
+        print("❌ Error: GROQ_API_KEY is missing from your environment variables.")
+        return
+
     print("🤖 AI is analyzing RTL and writing SystemVerilog...")
     ai_prompt = (
         "You are an expert Silicon Verification Engineer. "
@@ -109,25 +114,33 @@ def generate_tb_ai(file_path):
         f"RTL Code:\n{verilog_code}"
     )
 
-    final_reply = None
-    for model in RESEARCH_POOL:
-        try:
-            response = completion(model=model, messages=[{"role": "user", "content": ai_prompt}], temperature=0.2, timeout=15)
-            final_reply = response.choices[0].message.content.strip()
-            # Clean up markdown formatting if the AI still included it
-            final_reply = final_reply.removeprefix("```systemverilog").removeprefix("```verilog").removeprefix("```").removesuffix("```").strip()
-            break
-        except Exception:
-            continue
+    url = "[https://api.groq.com/openai/v1/chat/completions](https://api.groq.com/openai/v1/chat/completions)"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{"role": "user", "content": ai_prompt}],
+        "temperature": 0.2
+    }
 
-    if not final_reply:
-        print("❌ All AI models failed to respond.")
-        return
+    try:
+        req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'), headers=headers, method='POST')
+        with urllib.request.urlopen(req, timeout=20) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            final_reply = result['choices'][0]['message']['content'].strip()
+            
+            # Clean up markdown formatting safely for older Python versions
+            if final_reply.startswith("```"):
+                lines = final_reply.split('\n')
+                if lines[0].startswith("
+http://googleusercontent.com/immersive_entry_chip/0
+http://googleusercontent.com/immersive_entry_chip/1
 
-    out_file = f"tb_{module_name}_ai.sv"
-    with open(out_file, 'w') as f:
-        f.write(final_reply)
-    print(f"✅ AI SystemVerilog TB generated: {out_file}")
+Since you already set up the permissions and the global symlink, you do not need to run `chmod` or `ln -s` again. 
+
+Just type `vlsibot` in your terminal. It will instantly execute using only pure, native Linux Python libraries—no pip required.
 
 # ==========================================
 # 3. EDA Log Scanner (vlsibot scan)
