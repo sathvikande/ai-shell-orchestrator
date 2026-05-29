@@ -9,6 +9,7 @@ import re
 import json
 import concurrent.futures
 import threading
+import pandas as pd
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import xml.etree.ElementTree as ET
@@ -129,7 +130,6 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 ALLOWED_USER_ID_STR = os.environ.get("ALLOWED_USER_ID", "5984629521")
 ALLOWED_USER_IDS = [int(x.strip()) for x in ALLOWED_USER_ID_STR.split(",") if x.strip()] if ALLOWED_USER_ID_STR else []
 
-# NEW: Notion API Credentials
 NOTION_API_KEY = os.environ.get("NOTION_API_KEY")
 NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID")
 
@@ -179,7 +179,7 @@ async def call_with_failover(messages, model_pool, temperature=0.7, context=None
 # ==========================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USER_IDS: return
-    await update.message.reply_text("🧠 **Cloud Node Online!**\nWeb Browsing, Linux Execution, and Neon Postgres Memory Banks are operational.", parse_mode='Markdown')
+    await update.message.reply_text("🧠 **Cloud Node Online!**\nWeb Browsing, Data Analysis, and Linux Execution are operational.", parse_mode='Markdown')
 
 async def direct_shell(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sender_id = update.effective_user.id
@@ -357,12 +357,15 @@ async def scan_eda_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Error parsing log: {e}")
 
+# --- NEW DATA ANALYSIS PIPELINE INTEGRATED HERE ---
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sender_id = update.effective_user.id
     if sender_id not in ALLOWED_USER_IDS: return
 
     document = update.message.document
     file_name = document.file_name
+    caption = update.message.caption or ""
+    
     status_msg = await update.message.reply_text(f"📥 Downloading `{file_name}` to cloud container...")
 
     try:
@@ -370,177 +373,63 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_path = f"/tmp/{file_name}"
         await bot_file.download_to_drive(save_path)
         
-        success_msg = (
-            f"✅ **File saved successfully!**\n\n"
-            f"Run this command to analyze your routing report:\n"
-            f"`/scanlog {save_path}`"
-        )
-        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=success_msg, parse_mode='Markdown')
-        save_chat_memory(sender_id, "user", f"I uploaded a file named {file_name}.")
-        
-    except Exception as e:
-        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"❌ Download failed: {e}")
-
-async def log_to_notion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    sender_id = update.effective_user.id
-    if sender_id not in ALLOWED_USER_IDS: return
-
-    if not context.args:
-        await update.message.reply_text("Usage: `/log <your verilog or tcl snippet>`", parse_mode='Markdown')
-        return
-
-    content = " ".join(context.args)
-    status_msg = await update.message.reply_text("📝 Beaming to Notion...")
-
-    if not NOTION_API_KEY or not NOTION_DATABASE_ID:
-        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text="❌ Error: Notion keys missing in Render.")
-        return
-
-    url = "https://api.notion.com/v1/pages"
-    headers = {
-        "Authorization": f"Bearer {NOTION_API_KEY}",
-        "Content-Type": "application/json",
-        "Notion-Version": "2022-06-28"
-    }
-    
-    # This targets the default "Name" title column in a Notion Database
-    data = {
-        "parent": {"database_id": NOTION_DATABASE_ID},
-        "properties": {
-            "Name": {
-                "title": [{"text": {"content": content[:2000]}}]
-            }
-        }
-    }
-
-    try:
-        req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'), headers=headers, method='POST')
-        with urllib.request.urlopen(req, timeout=10) as response:
-            await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text="✅ **Saved to Knowledge Base!**", parse_mode='Markdown')
-    except Exception as e:
-        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"❌ API Error: {e}")
-
-async def generate_tb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    sender_id = update.effective_user.id
-    if sender_id not in ALLOWED_USER_IDS: return
-
-    if not context.args:
-        await update.message.reply_text("Usage: `/tb <verilog_module_code>`", parse_mode='Markdown')
-        return
-
-    verilog_code = update.message.text.replace('/tb', '', 1).strip()
-    mod_match = re.search(r'module\s+(\w+)', verilog_code)
-    
-    if not mod_match:
-        await update.message.reply_text("❌ Could not find a valid Verilog 'module' declaration.")
-        return
-    
-    module_name = mod_match.group(1)
-    ports = re.findall(r'(input|output|inout)\s+(wire|reg|logic)?\s*(\[[^\]]+\])?\s*(\w+)', verilog_code)
-    
-    if not ports:
-        await update.message.reply_text("❌ Could not parse any input/output ports. Ensure standard Verilog-2001 syntax.")
-        return
-
-    tb_code = f"`timescale 1ns / 1ps\n\nmodule tb_{module_name}();\n\n"
-    tb_code += "    // Signal Declarations\n"
-    inst_ports = []
-    has_clk = False
-    clk_name = ""
-    
-    for direction, net_type, dims, name in ports:
-        dims_str = f" {dims.strip()}" if dims else ""
-        tb_code += f"    logic{dims_str} {name};\n"
-        inst_ports.append(f".{name}({name})")
-        if direction == 'input' and name in ['clk', 'clock', 'sys_clk', 'sys_clock']:
-            has_clk = True
-            clk_name = name
-
-    tb_code += f"\n    // DUT Instantiation\n"
-    tb_code += f"    {module_name} dut (\n        "
-    tb_code += ",\n        ".join(inst_ports)
-    tb_code += "\n    );\n\n"
-
-    if has_clk:
-        tb_code += f"    // Clock Generation (100MHz)\n"
-        tb_code += f"    initial {clk_name} = 0;\n"
-        tb_code += f"    always #5 {clk_name} = ~{clk_name};\n\n"
-
-    tb_code += "    // Stimulus & Verification\n"
-    tb_code += "    initial begin\n"
-    tb_code += "        $dumpfile(\"dump.vcd\");\n"
-    tb_code += f"        $dumpvars(0, tb_{module_name});\n\n"
-    
-    for direction, net_type, dims, name in ports:
-        if direction == 'input' and name != clk_name:
-            tb_code += f"        {name} = 0;\n"
+        # Check if the user passed the '/analyze' shortcut
+        if caption.startswith('/analyze'):
+            cmd_parts = caption.split()
+            analysis_type = cmd_parts[1] if len(cmd_parts) > 1 else "general"
             
-    tb_code += "\n        #20;\n        // TODO: Drive signals here\n\n"
-    tb_code += "        #100;\n        $display(\"Simulation Complete.\");\n        $finish;\n    end\nendmodule\n"
+            await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"📊 Initializing automated '{analysis_type}' analysis on {file_name}...")
+            
+            # Extract header/preview data to save API tokens
+            try:
+                if file_name.endswith('.csv'):
+                    df = pd.read_csv(save_path, nrows=5)
+                    df_peek = df.to_string()
+                else:
+                    with open(save_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        df_peek = "".join([f.readline() for _ in range(15)])
+            except Exception as e:
+                df_peek = "Raw unstructured file or read error."
 
-    bt = "```"
-    await update.message.reply_text(f"✅ **SystemVerilog TB Generated:**\n\n{bt}systemverilog\n{tb_code}\n{bt}", parse_mode='Markdown')
+            system_prompt = (
+                "You are a Data Analytics Engine. Your job is to generate a clean, executable "
+                "Python script using pandas/numpy to analyze a dataset and print targeted insights. "
+                "Output ONLY pure python code inside a ```python block. No markdown descriptions. "
+                "Do not use input() or plot GUIs. Assume the file exists."
+            )
+            
+            user_prompt = f"""
+            The user wants a '{analysis_type}' analysis on the file located at: '{save_path}'
+            Here is a snapshot of the data structure/headers:
+            {df_peek}
+            
+            Write a python script that:
+            1. Loads this file safely.
+            2. Performs calculations relevant to '{analysis_type}'.
+            3. Uses print() to output a clear terminal summary.
+            """
+            
+            messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+            generated_code_raw, model_used = await call_with_failover(messages, RESEARCH_POOL, 0.2, context, status_msg, "Coding Script")
+            
+            # Extract the raw python code from the AI response
+            code_to_run = generated_code_raw
+            if "```python" in code_to_run:
+                code_to_run = code_to_run.split("```python")[1].split("```")[0].strip()
+            elif "```" in code_to_run:
+                code_to_run = code_to_run.split("```")[1].split("```")[0].strip()
 
-async def generate_tb_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    sender_id = update.effective_user.id
-    if sender_id not in ALLOWED_USER_IDS: return
-
-    if not context.args:
-        await update.message.reply_text("Usage: `/aitb <verilog_module_code>`", parse_mode='Markdown')
-        return
-
-    verilog_code = update.message.text.replace('/aitb', '', 1).strip()
-    status_msg = await update.message.reply_text("🤖 AI Verification Engineer analyzing RTL...")
-
-    ai_prompt = (
-        "You are an expert Silicon Verification Engineer at a Tier-1 semiconductor company. "
-        "Write a complete, professional SystemVerilog testbench for the following RTL module. "
-        "Include proper clock generation, reset initialization, and a basic directed test sequence. "
-        "Output ONLY valid SystemVerilog code inside a ```systemverilog block. Zero conversational filler.\n\n"
-        f"RTL Code:\n{verilog_code}"
-    )
-
-    try:
-        messages = [{"role": "user", "content": ai_prompt}]
-        final_reply, model_used = await call_with_failover(messages, RESEARCH_POOL, 0.2, context, status_msg, "TB Gen")
-        response_text = f"✅ **AI SystemVerilog TB Generated (via {model_used}):**\n\n{final_reply}"
-        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=response_text, parse_mode='Markdown')
-    except Exception as e:
-        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"❌ AI TB Generation failed: {e}")
-# ==========================================
-# 7. Render Keep-Alive Web Server
-# ==========================================
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-        self.wfile.write(b"VLSI Bot is alive and running!")
-
-    def log_message(self, format, *args):
-        pass 
-
-def start_health_server():
-    port = int(os.environ.get("PORT", 10000)) 
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    server.serve_forever()
-
-if __name__ == "__main__":
-    init_db()
-    threading.Thread(target=start_health_server, daemon=True).start()
-
-    request_config = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).request(request_config).build()
-    
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("sh", direct_shell))
-    app.add_handler(CommandHandler("remind", set_reminder))
-    app.add_handler(CommandHandler("scanlog", scan_eda_log))
-    app.add_handler(CommandHandler("log", log_to_notion))
-    app.add_handler(CommandHandler("tb", generate_tb))
-    app.add_handler(CommandHandler("aitb", generate_tb_ai))
-    app.add_handler(CallbackQueryHandler(handle_callback_query))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
-    app.run_polling()
+            script_path = f"/tmp/run_analysis_{sender_id}.py"
+            with open(script_path, "w") as f:
+                f.write(code_to_run)
+                
+            await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"⚙️ Running analysis script locally via {model_used}...")
+            
+            # Execute the generated Pandas script
+            try:
+                process = subprocess.run(["python3", script_path], capture_output=True, text=True, timeout=30)
+                if process.returncode == 0:
+                    analysis_output = process.stdout.strip()[:3800]
+                    response_msg = f"✅ **Analysis Complete:**\n\n```text\n{analysis_output}\n```"
+                else:
+                    response_msg = f"❌ **Execution Error in auto-script:**\n
