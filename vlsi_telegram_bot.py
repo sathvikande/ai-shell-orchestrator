@@ -409,15 +409,17 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Do not use input() or plot GUIs. Assume the file exists."
             )
             
-            user_prompt = f"""
+           user_prompt = f"""
             The user wants a '{analysis_type}' analysis on the file located at: '{save_path}'
-            Here is a snapshot of the data structure/headers:
+            Here is the exact data structure/headers:
             {df_peek}
             
             Write a python script that:
-            1. Loads this file safely.
-            2. Performs calculations relevant to '{analysis_type}'.
-            3. Uses print() to output a clear terminal summary.
+            1. Loads this file safely. 
+            2. VERY IMPORTANT: Strip whitespace from all column names before using them (e.g., df.columns = df.columns.str.strip()).
+            3. Performs calculations relevant to '{analysis_type}'. 
+            4. Uses print() to output a clear terminal summary.
+            5. Wrap your calculations in a try/except block that prints column names if it fails.
             """
             
             messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
