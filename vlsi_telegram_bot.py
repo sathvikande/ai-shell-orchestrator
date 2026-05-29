@@ -357,6 +357,7 @@ async def scan_eda_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Error parsing log: {e}")
 
+
 # --- NEW DATA ANALYSIS PIPELINE INTEGRATED HERE ---
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sender_id = update.effective_user.id
@@ -368,8 +369,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Safely grab the caption if it exists, make it lowercase
     caption = (update.message.caption or "").strip().lower()
     
-    # DEBUG MESSAGE: The bot will now tell you exactly what it saw!
+    # DEBUG MESSAGE - If you don't see this, you are running old code!
     status_msg = await update.message.reply_text(f"📥 Received File: `{file_name}`\n📝 Caption Seen: `{caption}`\nDownloading to cloud...")
+
     try:
         bot_file = await context.bot.get_file(document.file_id)
         save_path = f"/tmp/{file_name}"
@@ -465,3 +467,134 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"❌ Download failed: {e}")
+
+async def log_to_notion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sender_id = update.effective_user.id
+    if sender_id not in ALLOWED_USER_IDS: return
+
+    if not context.args:
+        await update.message.reply_text("Usage: `/log <your verilog or tcl snippet>`", parse_mode='Markdown')
+        return
+
+    content = " ".join(context.args)
+    status_msg = await update.message.reply_text("📝 Beaming to Notion...")
+
+    if not NOTION_API_KEY or not NOTION_DATABASE_ID:
+        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text="❌ Error: Notion keys missing in Render.")
+        return
+
+    url = "[https://api.notion.com/v1/pages](https://api.notion.com/v1/pages)"
+    headers = {
+        "Authorization": f"Bearer {NOTION_API_KEY}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    data = {
+        "parent": {"database_id": NOTION_DATABASE_ID},
+        "properties": {
+            "Name": {
+                "title": [{"text": {"content": content[:2000]}}]
+            }
+        }
+    }
+
+    try:
+        req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'), headers=headers, method='POST')
+        with urllib.request.urlopen(req, timeout=10) as response:
+            await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text="✅ **Saved to Knowledge Base!**", parse_mode='Markdown')
+    except Exception as e:
+        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"❌ API Error: {e}")
+
+async def generate_tb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sender_id = update.effective_user.id
+    if sender_id not in ALLOWED_USER_IDS: return
+
+    if not context.args:
+        await update.message.reply_text("Usage: `/tb <verilog_module_code>`", parse_mode='Markdown')
+        return
+
+    verilog_code = update.message.text.replace('/tb', '', 1).strip()
+    mod_match = re.search(r'module\s+(\w+)', verilog_code)
+    
+    if not mod_match:
+        await update.message.reply_text("❌ Could not find a valid Verilog 'module' declaration.")
+        return
+    
+    module_name = mod_match.group(1)
+    ports = re.findall(r'(input|output|inout)\s+(wire|reg|logic)?\s*(\[[^\]]+\])?\s*(\w+)', verilog_code)
+    
+    if not ports:
+        await update.message.reply_text("❌ Could not parse any input/output ports. Ensure standard Verilog-2001 syntax.")
+        return
+
+    tb_code = f"`timescale 1ns / 1ps\n\nmodule tb_{module_name}();\n\n"
+    tb_code += "    // Signal Declarations\n"
+    inst_ports = []
+    has_clk = False
+    clk_name = ""
+    
+    for direction, net_type, dims, name in ports:
+        dims_str = f" {dims.strip()}" if dims else ""
+        tb_code += f"    logic{dims_str} {name};\n"
+        inst_ports.append(f".{name}({name})")
+        if direction == 'input' and name in ['clk', 'clock', 'sys_clk', 'sys_clock']:
+            has_clk = True
+            clk_name = name
+
+    tb_code += f"\n    // DUT Instantiation\n"
+    tb_code += f"    {module_name} dut (\n        "
+    tb_code += ",\n        ".join(inst_ports)
+    tb_code += "\n    );\n\n"
+
+    if has_clk:
+        tb_code += f"    // Clock Generation (100MHz)\n"
+        tb_code += f"    initial {clk_name} = 0;\n"
+        tb_code += f"    always #5 {clk_name} = ~{clk_name};\n\n"
+
+    tb_code += "    // Stimulus & Verification\n"
+    tb_code += "    initial begin\n"
+    tb_code += "        $dumpfile(\"dump.vcd\");\n"
+    tb_code += f"        $dumpvars(0, tb_{module_name});\n\n"
+    
+    for direction, net_type, dims, name in ports:
+        if direction == 'input' and name != clk_name:
+            tb_code += f"        {name} = 0;\n"
+            
+    tb_code += "\n        #20;\n        // TODO: Drive signals here\n\n"
+    tb_code += "        #100;\n        $display(\"Simulation Complete.\");\n        $finish;\n    end\nendmodule\n"
+
+    bt = "```"
+    await update.message.reply_text(f"✅ **SystemVerilog TB Generated:**\n\n{bt}systemverilog\n{tb_code}\n{bt}", parse_mode='Markdown')
+
+async def generate_tb_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sender_id = update.effective_user.id
+    if sender_id not in ALLOWED_USER_IDS: return
+
+    if not context.args:
+        await update.message.reply_text("Usage: `/aitb <verilog_module_code>`", parse_mode='Markdown')
+        return
+
+    verilog_code = update.message.text.replace('/aitb', '', 1).strip()
+    status_msg = await update.message.reply_text("🤖 AI Verification Engineer analyzing RTL...")
+
+    ai_prompt = (
+        "You are an expert Silicon Verification Engineer at a Tier-1 semiconductor company. "
+        "Write a complete, professional SystemVerilog testbench for the following RTL module. "
+        "Include proper clock generation, reset initialization, and a basic directed test sequence. "
+        "Output ONLY valid SystemVerilog code inside a ```systemverilog block. Zero conversational filler.\n\n"
+        f"RTL Code:\n{verilog_code}"
+    )
+
+    try:
+        messages = [{"role": "user", "content": ai_prompt}]
+        final_reply, model_used = await call_with_failover(messages, RESEARCH_POOL, 0.2, context, status_msg, "TB Gen")
+        response_text = f"✅ **AI SystemVerilog TB Generated (via {model_used}):**\n\n{final_reply}"
+        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=response_text, parse_mode='Markdown')
+    except Exception as e:
+        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"❌ AI TB Generation failed: {e}")
+
+# ==========================================
+# 7. Render Keep-Alive Web Server
+# ==========================================
+class HealthCheckHandler
