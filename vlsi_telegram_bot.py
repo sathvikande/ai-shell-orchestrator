@@ -426,10 +426,22 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"⚙️ Running analysis script locally via {model_used}...")
             
             # Execute the generated Pandas script
+           # Execute the generated Pandas script
             try:
                 process = subprocess.run(["python3", script_path], capture_output=True, text=True, timeout=30)
                 if process.returncode == 0:
                     analysis_output = process.stdout.strip()[:3800]
-                    response_msg = f"✅ **Analysis Complete:**\n\n```text\n{analysis_output}\n```"
+                    response_msg = "✅ **Analysis Complete:**\n\n```text\n" + analysis_output + "\n```"
                 else:
-                    response_msg = f"❌ **Execution Error in auto-script:**\n```text\n{process.stderr}\n```"
+                    err_out = process.stderr.strip()[:1000]
+                    response_msg = "❌ **Execution Error in auto-script:**\n```text\n" + err_out + "\n```"
+            except Exception as e:
+                response_msg = f"❌ Analysis failed: {e}"
+                
+            # Cleanup temporary files from Render container
+            if os.path.exists(save_path): os.remove(save_path)
+            if os.path.exists(script_path): os.remove(script_path)
+            
+            await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=response_msg, parse_mode='Markdown')
+            save_chat_memory(sender_id, "user", f"Analyzed {file_name} for '{analysis_type}'.")
+            return
