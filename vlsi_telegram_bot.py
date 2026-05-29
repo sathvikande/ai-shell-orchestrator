@@ -6,6 +6,7 @@ import psycopg2
 import urllib.request
 import urllib.parse
 import re
+import json
 import concurrent.futures
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -127,6 +128,10 @@ def web_browse(query):
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 ALLOWED_USER_ID_STR = os.environ.get("ALLOWED_USER_ID", "5984629521")
 ALLOWED_USER_IDS = [int(x.strip()) for x in ALLOWED_USER_ID_STR.split(",") if x.strip()] if ALLOWED_USER_ID_STR else []
+
+# NEW: Notion API Credentials
+NOTION_API_KEY = os.environ.get("NOTION_API_KEY")
+NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID")
 
 # ==========================================
 # 4. Model Pools & Custom Personalization
@@ -361,26 +366,59 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await update.message.reply_text(f"📥 Downloading `{file_name}` to cloud container...")
 
     try:
-        # Fetch the file from Telegram's servers
         bot_file = await context.bot.get_file(document.file_id)
         save_path = f"/tmp/{file_name}"
-        
-        # Save it directly into your Render Linux environment
         await bot_file.download_to_drive(save_path)
         
-        # Provide the exact command to scan it
         success_msg = (
             f"✅ **File saved successfully!**\n\n"
             f"Run this command to analyze your routing report:\n"
             f"`/scanlog {save_path}`"
         )
         await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=success_msg, parse_mode='Markdown')
-        
         save_chat_memory(sender_id, "user", f"I uploaded a file named {file_name}.")
         
     except Exception as e:
         await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"❌ Download failed: {e}")
 
+async def log_to_notion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sender_id = update.effective_user.id
+    if sender_id not in ALLOWED_USER_IDS: return
+
+    if not context.args:
+        await update.message.reply_text("Usage: `/log <your verilog or tcl snippet>`", parse_mode='Markdown')
+        return
+
+    content = " ".join(context.args)
+    status_msg = await update.message.reply_text("📝 Beaming to Notion...")
+
+    if not NOTION_API_KEY or not NOTION_DATABASE_ID:
+        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text="❌ Error: Notion keys missing in Render.")
+        return
+
+    url = "https://api.notion.com/v1/pages"
+    headers = {
+        "Authorization": f"Bearer {NOTION_API_KEY}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    # This targets the default "Name" title column in a Notion Database
+    data = {
+        "parent": {"database_id": NOTION_DATABASE_ID},
+        "properties": {
+            "Name": {
+                "title": [{"text": {"content": content[:2000]}}]
+            }
+        }
+    }
+
+    try:
+        req = urllib.request.Request(url, data=json.dumps(data).encode('utf-8'), headers=headers, method='POST')
+        with urllib.request.urlopen(req, timeout=10) as response:
+            await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text="✅ **Saved to Knowledge Base!**", parse_mode='Markdown')
+    except Exception as e:
+        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"❌ API Error: {e}")
 
 # ==========================================
 # 7. Render Keep-Alive Web Server
@@ -411,6 +449,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("sh", direct_shell))
     app.add_handler(CommandHandler("remind", set_reminder))
     app.add_handler(CommandHandler("scanlog", scan_eda_log))
+    app.add_handler(CommandHandler("log", log_to_notion))
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
