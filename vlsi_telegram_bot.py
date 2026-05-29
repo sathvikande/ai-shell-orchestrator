@@ -352,6 +352,36 @@ async def scan_eda_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Error parsing log: {e}")
 
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sender_id = update.effective_user.id
+    if sender_id not in ALLOWED_USER_IDS: return
+
+    document = update.message.document
+    file_name = document.file_name
+    status_msg = await update.message.reply_text(f"📥 Downloading `{file_name}` to cloud container...")
+
+    try:
+        # Fetch the file from Telegram's servers
+        bot_file = await context.bot.get_file(document.file_id)
+        save_path = f"/tmp/{file_name}"
+        
+        # Save it directly into your Render Linux environment
+        await bot_file.download_to_drive(save_path)
+        
+        # Provide the exact command to scan it
+        success_msg = (
+            f"✅ **File saved successfully!**\n\n"
+            f"Run this command to analyze your routing report:\n"
+            f"`/scanlog {save_path}`"
+        )
+        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=success_msg, parse_mode='Markdown')
+        
+        save_chat_memory(sender_id, "user", f"I uploaded a file named {file_name}.")
+        
+    except Exception as e:
+        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"❌ Download failed: {e}")
+
+
 # ==========================================
 # 7. Render Keep-Alive Web Server
 # ==========================================
@@ -382,6 +412,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("remind", set_reminder))
     app.add_handler(CommandHandler("scanlog", scan_eda_log))
     app.add_handler(CallbackQueryHandler(handle_callback_query))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     app.run_polling()
