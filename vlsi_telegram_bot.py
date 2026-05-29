@@ -420,6 +420,93 @@ async def log_to_notion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"❌ API Error: {e}")
 
+async def generate_tb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sender_id = update.effective_user.id
+    if sender_id not in ALLOWED_USER_IDS: return
+
+    if not context.args:
+        await update.message.reply_text("Usage: `/tb <verilog_module_code>`", parse_mode='Markdown')
+        return
+
+    verilog_code = update.message.text.replace('/tb', '', 1).strip()
+    mod_match = re.search(r'module\s+(\w+)', verilog_code)
+    
+    if not mod_match:
+        await update.message.reply_text("❌ Could not find a valid Verilog 'module' declaration.")
+        return
+    
+    module_name = mod_match.group(1)
+    ports = re.findall(r'(input|output|inout)\s+(wire|reg|logic)?\s*(\[[^\]]+\])?\s*(\w+)', verilog_code)
+    
+    if not ports:
+        await update.message.reply_text("❌ Could not parse any input/output ports. Ensure standard Verilog-2001 syntax.")
+        return
+
+    tb_code = f"`timescale 1ns / 1ps\n\nmodule tb_{module_name}();\n\n"
+    tb_code += "    // Signal Declarations\n"
+    inst_ports = []
+    has_clk = False
+    clk_name = ""
+    
+    for direction, net_type, dims, name in ports:
+        dims_str = f" {dims.strip()}" if dims else ""
+        tb_code += f"    logic{dims_str} {name};\n"
+        inst_ports.append(f".{name}({name})")
+        if direction == 'input' and name in ['clk', 'clock', 'sys_clk', 'sys_clock']:
+            has_clk = True
+            clk_name = name
+
+    tb_code += f"\n    // DUT Instantiation\n"
+    tb_code += f"    {module_name} dut (\n        "
+    tb_code += ",\n        ".join(inst_ports)
+    tb_code += "\n    );\n\n"
+
+    if has_clk:
+        tb_code += f"    // Clock Generation (100MHz)\n"
+        tb_code += f"    initial {clk_name} = 0;\n"
+        tb_code += f"    always #5 {clk_name} = ~{clk_name};\n\n"
+
+    tb_code += "    // Stimulus & Verification\n"
+    tb_code += "    initial begin\n"
+    tb_code += "        $dumpfile(\"dump.vcd\");\n"
+    tb_code += f"        $dumpvars(0, tb_{module_name});\n\n"
+    
+    for direction, net_type, dims, name in ports:
+        if direction == 'input' and name != clk_name:
+            tb_code += f"        {name} = 0;\n"
+            
+    tb_code += "\n        #20;\n        // TODO: Drive signals here\n\n"
+    tb_code += "        #100;\n        $display(\"Simulation Complete.\");\n        $finish;\n    end\nendmodule\n"
+
+    bt = "```"
+    await update.message.reply_text(f"✅ **SystemVerilog TB Generated:**\n\n{bt}systemverilog\n{tb_code}\n{bt}", parse_mode='Markdown')
+
+async def generate_tb_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sender_id = update.effective_user.id
+    if sender_id not in ALLOWED_USER_IDS: return
+
+    if not context.args:
+        await update.message.reply_text("Usage: `/aitb <verilog_module_code>`", parse_mode='Markdown')
+        return
+
+    verilog_code = update.message.text.replace('/aitb', '', 1).strip()
+    status_msg = await update.message.reply_text("🤖 AI Verification Engineer analyzing RTL...")
+
+    ai_prompt = (
+        "You are an expert Silicon Verification Engineer at a Tier-1 semiconductor company. "
+        "Write a complete, professional SystemVerilog testbench for the following RTL module. "
+        "Include proper clock generation, reset initialization, and a basic directed test sequence. "
+        "Output ONLY valid SystemVerilog code inside a ```systemverilog block. Zero conversational filler.\n\n"
+        f"RTL Code:\n{verilog_code}"
+    )
+
+    try:
+        messages = [{"role": "user", "content": ai_prompt}]
+        final_reply, model_used = await call_with_failover(messages, RESEARCH_POOL, 0.2, context, status_msg, "TB Gen")
+        response_text = f"✅ **AI SystemVerilog TB Generated (via {model_used}):**\n\n{final_reply}"
+        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=response_text, parse_mode='Markdown')
+    except Exception as e:
+        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"❌ AI TB Generation failed: {e}")
 # ==========================================
 # 7. Render Keep-Alive Web Server
 # ==========================================
@@ -450,6 +537,8 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("remind", set_reminder))
     app.add_handler(CommandHandler("scanlog", scan_eda_log))
     app.add_handler(CommandHandler("log", log_to_notion))
+    app.add_handler(CommandHandler("tb", generate_tb))
+    app.add_handler(CommandHandler("aitb", generate_tb_ai))
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
