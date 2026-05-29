@@ -426,7 +426,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"⚙️ Running analysis script locally via {model_used}...")
             
             # Execute the generated Pandas script
-           # Execute the generated Pandas script
             try:
                 process = subprocess.run(["python3", script_path], capture_output=True, text=True, timeout=30)
                 if process.returncode == 0:
@@ -445,3 +444,15 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=response_msg, parse_mode='Markdown')
             save_chat_memory(sender_id, "user", f"Analyzed {file_name} for '{analysis_type}'.")
             return
+
+        # --- Standard File Upload Logic (If no '/analyze' caption is passed) ---
+        success_msg = (
+            f"✅ **File saved successfully!**\n\n"
+            f"Run this command to check a routing report:\n"
+            f"`/scanlog {save_path}`"
+        )
+        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=success_msg, parse_mode='Markdown')
+        save_chat_memory(sender_id, "user", f"I uploaded a file named {file_name}.")
+        
+    except Exception as e:
+        await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text=f"❌ Download failed: {e}")
