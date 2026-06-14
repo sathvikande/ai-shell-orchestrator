@@ -654,7 +654,7 @@ if __name__ == "__main__":
 
 # Use cron strings instead of datetime.time objects
     scheduler.add_job(send_daily_vlsi_update, 'cron', hour=9, minute=0)
-    scheduler.add_job(send_daily_vlsi_update, 'cron', hour=14, minute=40)
+    scheduler.add_job(send_daily_vlsi_update, 'cron', hour=14, minute=46)
     scheduler.start()
     # Add all your existing handlers here...
     
