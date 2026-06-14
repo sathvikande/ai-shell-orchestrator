@@ -183,8 +183,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USER_IDS: return
     await update.message.reply_text("🧠 **Cloud Node Online!**\nWeb Browsing, Data Analysis, and Linux Execution are operational.", parse_mode='Markdown')
     
-async def send_daily_vlsi_update(context: ContextTypes.DEFAULT_TYPE):
-    """Generates and sends the daily VLSI resource update."""
+# Change the function signature to take NO arguments
+async def send_daily_vlsi_update():
+    global app  # Ensure your 'app' variable is accessible here
+    
     prompt = """
     Act as an expert VLSI engineer. Provide:
     - 3 top VLSI verification/design resources.
@@ -194,10 +196,15 @@ async def send_daily_vlsi_update(context: ContextTypes.DEFAULT_TYPE):
     Keep it concise and formatted for Telegram.
     """
     try:
-        # Using the same logic as your other handlers
         messages = [{"role": "user", "content": prompt}]
         final_reply, _ = await call_with_failover(messages, RESEARCH_POOL, 0.6)
-        await context.bot.send_message(chat_id=int(os.environ.get("TELEGRAM_CHAT_ID")), text=final_reply, parse_mode='Markdown')
+        
+        # Use app.bot instead of context.bot
+        await app.bot.send_message(
+            chat_id=int(os.environ.get("TELEGRAM_CHAT_ID")), 
+            text=final_reply, 
+            parse_mode='Markdown'
+        )
     except Exception as e:
         logging.error(f"Daily update failed: {e}")
         
