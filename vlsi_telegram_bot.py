@@ -642,14 +642,14 @@ if __name__ == "__main__":
     request_config = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).request(request_config).build()
     
+   # In your main() or if __name__ == "__main__": block:
     scheduler = AsyncIOScheduler()
-    # Schedule the jobs (9:00 AM and 2:30 PM)
+
+# Use cron strings instead of datetime.time objects
     scheduler.add_job(send_daily_vlsi_update, 'cron', hour=9, minute=0)
-    scheduler.add_job(send_daily_vlsi_update, 'cron', hour=14, minute=35)
+    scheduler.add_job(send_daily_vlsi_update, 'cron', hour=14, minute=40)
     scheduler.start()
-    
     # Add all your existing handlers here...
-    app.add_handler(CommandHandler("start", start))
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("sh", direct_shell))
