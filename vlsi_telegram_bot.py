@@ -1,3 +1,4 @@
+import datetime
 import logging
 import asyncio
 import os
@@ -180,7 +181,25 @@ async def call_with_failover(messages, model_pool, temperature=0.7, context=None
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USER_IDS: return
     await update.message.reply_text("🧠 **Cloud Node Online!**\nWeb Browsing, Data Analysis, and Linux Execution are operational.", parse_mode='Markdown')
-
+    
+async def send_daily_vlsi_update(context: ContextTypes.DEFAULT_TYPE):
+    """Generates and sends the daily VLSI resource update."""
+    prompt = """
+    Act as an expert VLSI engineer. Provide:
+    - 3 top VLSI verification/design resources.
+    - 2 trending YouTube videos on VLSI/SystemVerilog.
+    - 3 current electronics engineering internship or job links.
+    - 1 high-quality VLSI-related GitHub repository project for today.
+    Keep it concise and formatted for Telegram.
+    """
+    try:
+        # Using the same logic as your other handlers
+        messages = [{"role": "user", "content": prompt}]
+        final_reply, _ = await call_with_failover(messages, RESEARCH_POOL, 0.6)
+        await context.bot.send_message(chat_id=int(os.environ.get("TELEGRAM_CHAT_ID")), text=final_reply, parse_mode='Markdown')
+    except Exception as e:
+        logging.error(f"Daily update failed: {e}")
+        
 async def direct_shell(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sender_id = update.effective_user.id
     if sender_id not in ALLOWED_USER_IDS: return
@@ -621,6 +640,12 @@ if __name__ == "__main__":
 
     request_config = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).request(request_config).build()
+    
+    # --- ADDED: Daily Scheduling ---
+    job_queue = app.job_queue
+    job_queue.run_daily(send_daily_vlsi_update, time=datetime.time(hour=9, minute=0, second=0), chat_id=int(os.environ.get("TELEGRAM_CHAT_ID")))
+    job_queue.run_daily(send_daily_vlsi_update, time=datetime.time(hour=14, minute=30, second=0), chat_id=int(os.environ.get("TELEGRAM_CHAT_ID")))
+    # -------------------------------
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("sh", direct_shell))
