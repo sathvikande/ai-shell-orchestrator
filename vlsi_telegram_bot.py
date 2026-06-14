@@ -653,8 +653,8 @@ if __name__ == "__main__":
     scheduler = AsyncIOScheduler()
 
 # Use cron strings instead of datetime.time objects
-    scheduler.add_job(send_daily_vlsi_update, 'cron', hour=3, minute=02)
-    scheduler.add_job(send_daily_vlsi_update, 'cron', hour=15, minute=00)
+    scheduler.add_job(send_daily_vlsi_update, 'cron', hour=3, minute=5)
+    scheduler.add_job(send_daily_vlsi_update, 'cron', hour=15, minute=10)
     scheduler.start()
     # Add all your existing handlers here...
     
