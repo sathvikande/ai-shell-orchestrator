@@ -12,6 +12,7 @@ import concurrent.futures
 import threading
 import pandas as pd
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -641,11 +642,14 @@ if __name__ == "__main__":
     request_config = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).request(request_config).build()
     
-    # --- ADDED: Daily Scheduling ---
-    job_queue = app.job_queue
-    job_queue.run_daily(send_daily_vlsi_update, time=datetime.time(hour=9, minute=0, second=0), chat_id=int(os.environ.get("TELEGRAM_CHAT_ID")))
-    job_queue.run_daily(send_daily_vlsi_update, time=datetime.time(hour=14, minute=30, second=0), chat_id=int(os.environ.get("TELEGRAM_CHAT_ID")))
-    # -------------------------------
+    scheduler = AsyncIOScheduler()
+    # Schedule the jobs (9:00 AM and 2:30 PM)
+    scheduler.add_job(send_daily_vlsi_update, 'cron', hour=9, minute=0)
+    scheduler.add_job(send_daily_vlsi_update, 'cron', hour=14, minute=35)
+    scheduler.start()
+    
+    # Add all your existing handlers here...
+    app.add_handler(CommandHandler("start", start))
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("sh", direct_shell))
