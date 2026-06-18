@@ -183,23 +183,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USER_IDS: return
     await update.message.reply_text("🧠 **Cloud Node Online!**\nWeb Browsing, Data Analysis, and Linux Execution are operational.", parse_mode='Markdown')
     
-# Change the function signature to take NO arguments
+
 async def send_daily_vlsi_update():
-    global app  # Ensure your 'app' variable is accessible here
+    global app  # Ensure the global app instance is accessible
     
+    # 1. Define the prompt for the AI
     prompt = """
-    Act as an expert VLSI engineer. Provide:
+    Act as an expert VLSI engineer. Provide a concise update for today, June 18, 2026:
     - 3 top VLSI verification/design resources.
     - 2 trending YouTube videos on VLSI/SystemVerilog.
     - 3 current electronics engineering internship or job links.
     - 1 high-quality VLSI-related GitHub repository project for today.
     Keep it concise and formatted for Telegram.
     """
+    
     try:
+        # 2. Get the AI response using your failover engine
         messages = [{"role": "user", "content": prompt}]
         final_reply, _ = await call_with_failover(messages, RESEARCH_POOL, 0.6)
         
-        # Use app.bot instead of context.bot
+        # 3. Use app.bot to send messages
         await app.bot.send_message(
             chat_id=int(os.environ.get("TELEGRAM_CHAT_ID")), 
             text=final_reply, 
@@ -207,7 +210,6 @@ async def send_daily_vlsi_update():
         )
     except Exception as e:
         logging.error(f"Daily update failed: {e}")
-        
 async def direct_shell(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sender_id = update.effective_user.id
     if sender_id not in ALLOWED_USER_IDS: return
@@ -644,19 +646,20 @@ def start_health_server():
 
 if __name__ == "__main__":
     init_db()
+    # Ensure health server runs in background
     threading.Thread(target=start_health_server, daemon=True).start()
 
-    request_config = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
+    # Define global app
+    global app
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).request(request_config).build()
     
-   # In your main() or if __name__ == "__main__": block:
+    # Scheduler Setup
     scheduler = AsyncIOScheduler()
-
-# Use cron strings instead of datetime.time objects
     scheduler.add_job(send_daily_vlsi_update, 'cron', hour=3, minute=5)
-    scheduler.add_job(send_daily_vlsi_update, 'cron', hour=15, minute=10)
+    scheduler.add_job(send_daily_vlsi_update, 'cron', hour=13, minute=15)
     scheduler.start()
-    # Add all your existing handlers here...
+    
+
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("sh", direct_shell))
