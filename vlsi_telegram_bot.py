@@ -646,18 +646,20 @@ def start_health_server():
 
 if __name__ == "__main__":
     init_db()
-    # Ensure health server runs in background
-    threading.Thread(target=start_health_server, daemon=True).start()
-
-    # Define global app
+    # 1. Define the config FIRST
+    request_config = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
+    
+    # 2. Now initialize app using that config
     global app
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).request(request_config).build()
     
-    # Scheduler Setup
+    # 3. Rest of your setup...
+    threading.Thread(target=start_health_server, daemon=True).start()
+    
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(send_daily_vlsi_update, 'cron', hour=3, minute=5)
-    scheduler.add_job(send_daily_vlsi_update, 'cron', hour=13, minute=15)
-    scheduler.start()
+    # ... your scheduler and handler logic ...
+    
+    app.run_polling()
     
 
     
