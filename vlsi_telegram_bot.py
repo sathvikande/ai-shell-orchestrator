@@ -653,6 +653,11 @@ if __name__ == "__main__":
         logging.error("TELEGRAM_TOKEN is missing! Please set it in your environment variables.")
         exit(1)
 
+    # ADD THESE 3 LINES RIGHT HERE:
+    if not DATABASE_URL:
+        logging.error("DATABASE_URL is missing! Please set it in your Render environment variables.")
+        exit(1)
+
     init_db()
     
     # 1. Define the config FIRST
