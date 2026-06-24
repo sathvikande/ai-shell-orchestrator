@@ -202,14 +202,18 @@ async def send_daily_vlsi_update():
         messages = [{"role": "user", "content": prompt}]
         final_reply, _ = await call_with_failover(messages, RESEARCH_POOL, 0.6)
         
-        # 3. Use app.bot to send messages
+        # 3. Use app.bot to send messages safely (fallback to ALLOWED_USER_IDS[0] if no chat ID)
+        chat_id_str = os.environ.get("TELEGRAM_CHAT_ID")
+        chat_id = int(chat_id_str) if chat_id_str else ALLOWED_USER_IDS[0]
+        
         await app.bot.send_message(
-            chat_id=int(os.environ.get("TELEGRAM_CHAT_ID")), 
+            chat_id=chat_id, 
             text=final_reply, 
             parse_mode='Markdown'
         )
     except Exception as e:
         logging.error(f"Daily update failed: {e}")
+
 async def direct_shell(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sender_id = update.effective_user.id
     if sender_id not in ALLOWED_USER_IDS: return
@@ -515,7 +519,7 @@ async def log_to_notion(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.edit_message_text(chat_id=status_msg.chat_id, message_id=status_msg.message_id, text="❌ Error: Notion keys missing in Render.")
         return
 
-    url = "[https://api.notion.com/v1/pages](https://api.notion.com/v1/pages)"
+    url = "https://api.notion.com/v1/pages"
     headers = {
         "Authorization": f"Bearer {NOTION_API_KEY}",
         "Content-Type": "application/json",
@@ -645,24 +649,27 @@ def start_health_server():
     server.serve_forever()
 
 if __name__ == "__main__":
+    if not TELEGRAM_TOKEN:
+        logging.error("TELEGRAM_TOKEN is missing! Please set it in your environment variables.")
+        exit(1)
+
     init_db()
+    
     # 1. Define the config FIRST
     request_config = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
     
     # 2. Now initialize app using that config
-    global app
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).request(request_config).build()
     
     # 3. Rest of your setup...
     threading.Thread(target=start_health_server, daemon=True).start()
     
+    # 4. Start the scheduler for the daily VLSI update
     scheduler = AsyncIOScheduler()
-    # ... your scheduler and handler logic ...
+    scheduler.add_job(send_daily_vlsi_update, 'cron', hour=9, minute=0)
+    scheduler.start()
     
-    app.run_polling()
-    
-
-    
+    # 5. Add all your command and message handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("sh", direct_shell))
     app.add_handler(CommandHandler("remind", set_reminder))
@@ -674,4 +681,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
+    logging.info("Starting VLSI Telegram Bot polling...")
     app.run_polling()
